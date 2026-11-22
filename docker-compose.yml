@@ -1,0 +1,13 @@
+services:
+  ngenic-mqtt:
+    build: .
+    container_name: ngenic-mqtt
+    restart: unless-stopped
+    env_file: ngenic.env
+    healthcheck:
+      # unhealthy if the heartbeat file is older than 30 minutes
+      test: ["CMD", "python", "-c", "import os,time,sys; p=os.environ.get('HEARTBEAT_FILE',''); sys.exit(0 if p and os.path.exists(p) and time.time()-os.path.getmtime(p) < 1800 else 1)"]
+      interval: 5m
+      timeout: 10s
+      retries: 3
+      start_period: 2m
