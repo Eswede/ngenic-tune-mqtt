@@ -212,7 +212,34 @@ UNIT_BY_TYPE = {
 }
 
 # nodtyp -> etikett (delvis verifierat: 0=sensor, 1=controller, 2=gateway, 3=okänd)
-NODE_TYPE_LABELS = {0: "sensor", 1: "controller", 2: "gateway"}
+NODE_TYPE_LABELS = {0: "Sensor", 1: "Controller", 2: "Gateway"}
+
+# Vänliga entity-namn per (nodtyp, mätartyp). unique_id och state-topics lämnas
+# orörda, så befintliga HA-entiteter bara byter visningsnamn (historiken behålls).
+FRIENDLY_BY_TYPE = {
+    ("Controller", "temperature_C"): "Outdoor (real)",
+    ("Controller", "control_value_C"): "Outdoor (injected by Tune)",
+    ("Controller", "control_temp_C"): "Outdoor (injected by Tune)",
+    ("Controller", "process_value_C"): "Indoor (process value)",
+    ("Controller", "setpoint_value_C"): "Setpoint",
+    ("Sensor", "temperature_C"): "Indoor temperature",
+    ("Sensor", "target_temperature_C"): "Target temperature",
+    ("Sensor", "humidity_relative_percent"): "Humidity",
+}
+FRIENDLY_FALLBACK = {
+    "temperature_C": "Temperature",
+    "target_temperature_C": "Target temperature",
+    "humidity_relative_percent": "Humidity",
+    "humidity": "Humidity",
+    "power_W": "Power",
+    "energy_Wh": "Energy",
+}
+
+
+def friendly_label(node_type, mtype):
+    nt = NODE_TYPE_LABELS.get(node_type, "node")
+    return (FRIENDLY_BY_TYPE.get((nt, mtype))
+            or FRIENDLY_FALLBACK.get(mtype, mtype))
 
 
 def flatten_nodes(nodes, out):
@@ -264,11 +291,11 @@ def extract_value(payload):
     return None, None
 
 
-def discover(node_slug, node_uuid, mtype, node_name):
+def discover(node_slug, node_uuid, mtype, node_name, label=None):
     device_class, unit = UNIT_BY_TYPE.get(mtype, (None, None))
     unique_id = f"ngenic_{node_slug}_{slugify(mtype)}"
     config = {
-        "name": f"Ngenic {node_name} {mtype}",
+        "name": f"Ngenic {node_name} {label or mtype}",
         "unique_id": unique_id,
         "state_topic": f"ngenic/{node_slug}/{mtype}",
         "availability_topic": AVAIL_TOPIC,
@@ -344,7 +371,7 @@ def poll_once():
             if room_name and isinstance(target, (int, float)):
                 rslug = slugify(room_name)
                 disc("sensor", f"ngenic_{rslug}_target_c",
-                     f"Ngenic {room_name} måltemperatur",
+                     f"Ngenic {room_name} target temperature",
                      f"ngenic/{rslug}/target_c",
                      [f"ngenic_room_{room.get('uuid', rslug)}"],
                      f"Ngenic {room_name}",
@@ -378,6 +405,7 @@ def poll_once():
             node_slug = slugify(f"{node_name}_{node_uuid[:8]}")
             labels[node_uuid] = (node_name, node_slug)
 
+            ctrl_vals = {}  # controller: verklig + fejkad utetemp för influence
             mtypes = extract_types(
                 api_get(f"/tunes/{tune_uuid}/measurements/{node_uuid}/types")
             )
@@ -389,11 +417,31 @@ def poll_once():
                 value, _ts = extract_value(payload)
                 if value is None:
                     continue
-                state_topic = discover(node_slug, node_uuid, mtype, node_name)
+                state_topic = discover(node_slug, node_uuid, mtype, node_name,
+                                        label=friendly_label(node.get("type"), mtype))
                 if isinstance(value, float):
                     value = round(value, 2)
                 pub(state_topic, str(value), retain=True)
+                if node.get("type") == 1:
+                    ctrl_vals[mtype] = value
                 log.debug("%s/%s = %s", node_name, mtype, value)
+
+            # Tune-inflytande ("influence"/Påverkan): fejkad - verklig utetemp,
+            # publiceras direkt av bron på controller-enheten.
+            if node.get("type") == 1:
+                real = ctrl_vals.get("temperature_C")
+                injected = ctrl_vals.get(
+                    "control_value_C", ctrl_vals.get("control_temp_C")
+                )
+                if isinstance(real, (int, float)) and isinstance(injected, (int, float)):
+                    disc("sensor", f"ngenic_{node_slug}_influence",
+                         f"Ngenic Influence ({node_name})",
+                         f"ngenic/{node_slug}/influence",
+                         [f"ngenic_{node_uuid}"], f"Ngenic {node_name}",
+                         device_class="temperature", unit="°C")
+                    pub(f"ngenic/{node_slug}/influence",
+                        str(round(injected - real, 2)), retain=True)
+                    log.debug("%s/influence = %.2f", node_name, injected - real)
 
         # styrinställningar: elprisstyrning på/av
         settings = api_get(f"/tunes/{tune_uuid}/controlsettings") or {}
@@ -402,7 +450,7 @@ def poll_once():
             pub(
                 f"{DISCOVERY_PREFIX}/binary_sensor/{uid}/config",
                 json.dumps({
-                    "name": "Ngenic elprisstyrning aktiv",
+                    "name": "Ngenic spot price control active",
                     "unique_id": uid,
                     "state_topic": f"ngenic/{slugify(tune_name)}/spot_price_active",
                     "payload_on": "True",
@@ -423,7 +471,7 @@ def poll_once():
         if "controlOnUserDefinedControls" in settings:
             uid = "ngenic_user_defined_controls"
             disc("binary_sensor", uid,
-                 "Ngenic egna styrvärden aktiva",
+                 "Ngenic user-defined controls active",
                  f"ngenic/{slugify(tune_name)}/user_defined_controls",
                  [f"ngenic_tune_{tune_uuid}"], f"Ngenic {tune_name}",
                  payload_on="True")
@@ -441,18 +489,18 @@ def poll_once():
             nname, nslug = labels.get(nu, (f"node{nu[:8]}", slugify(f"node_{nu[:8]}")))
             dev = [f"ngenic_{nu}"], f"Ngenic {nname}"
             disc("binary_sensor", f"ngenic_{nslug}_connected",
-                 f"Ngenic {nname} ansluten", f"ngenic/{nslug}/connected",
+                 f"Ngenic {nname} connected", f"ngenic/{nslug}/connected",
                  dev[0], dev[1], payload_on="True")
             pub(f"ngenic/{nslug}/connected", str(st.get("isConnected")), retain=True)
             maxb, b = st.get("maxBattery"), st.get("battery")
             if isinstance(maxb, int) and maxb > 0 and isinstance(b, int):
                 disc("sensor", f"ngenic_{nslug}_battery",
-                     f"Ngenic {nname} batteri", f"ngenic/{nslug}/battery",
+                     f"Ngenic {nname} battery", f"ngenic/{nslug}/battery",
                      dev[0], dev[1], device_class="battery", unit="%")
                 pub(f"ngenic/{nslug}/battery", str(round(100 * b / maxb)), retain=True)
             # radioStatus är en diagnostisk niv 0..maxRadioStatus
             disc("sensor", f"ngenic_{nslug}_radio",
-                 f"Ngenic {nname} signalnivå", f"ngenic/{nslug}/radio",
+                 f"Ngenic {nname} radio signal", f"ngenic/{nslug}/radio",
                  dev[0], dev[1], entity_category="diagnostic")
             pub(f"ngenic/{nslug}/radio", str(st.get("radioStatus")), retain=True)
 
@@ -469,13 +517,13 @@ def poll_once():
         tslug = slugify(tune_name)
         tune_dev = [f"ngenic_tune_{tune_uuid}"], f"Ngenic {tune_name}"
         disc("binary_sensor", "ngenic_schedule_active",
-             "Ngenic schema aktivt (bortaläge)", f"ngenic/{tslug}/schedule_active",
+             "Ngenic away schedule active", f"ngenic/{tslug}/schedule_active",
              tune_dev[0], tune_dev[1], payload_on="True")
         pub(f"ngenic/{tslug}/schedule_active", str(active is not None), retain=True)
         disc("sensor", "ngenic_schedule_lowest_setpoint",
-             "Ngenic schema lägsta temperatur", f"ngenic/{tslug}/schedule_lowest",
+             "Ngenic away schedule lowest temp", f"ngenic/{tslug}/schedule_lowest",
              tune_dev[0], tune_dev[1], device_class="temperature", unit="°C")
-        disc("sensor", "ngenic_schedule_name", "Ngenic schema namn",
+        disc("sensor", "ngenic_schedule_name", "Ngenic away schedule name",
              f"ngenic/{tslug}/schedule_name", tune_dev[0], tune_dev[1])
         if active:
             pub(f"ngenic/{tslug}/schedule_lowest",
@@ -494,7 +542,7 @@ def poll_once():
     pub(
         f"{DISCOVERY_PREFIX}/sensor/{uid}/config",
         json.dumps({
-            "name": "Ngenic senaste poll",
+            "name": "Ngenic last poll",
             "unique_id": uid,
             "state_topic": f"ngenic/{MQTT_CLIENT_ID}/last_poll",
             "device_class": "timestamp",

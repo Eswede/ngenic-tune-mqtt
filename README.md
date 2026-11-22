@@ -23,6 +23,7 @@ Sensors are created automatically via MQTT discovery (`sensor.ngenic_*`):
 | `ngenic_controller_<id>_temperature_c` | **Real outdoor temperature** (the controller's sensor) |
 | `ngenic_controller_<id>_control_value_c` | **Fake outdoor temperature Tune feeds your heat system** |
 | `ngenic_controller_<id>_process_value_c` / `..._setpoint_value_c` | Process value / computed setpoint |
+| **`ngenic_controller_<id>_influence`** | **Tune's "Påverkan" (influence), computed by the bridge: `control_value_C − temperature_C`** |
 | `binary_sensor.ngenic_<node>_connected` | Node connectivity |
 | `sensor.ngenic_<node>_battery` | Battery % (battery-powered nodes) |
 | `sensor.ngenic_<node>_radio` | Radio signal level (diagnostic) |
@@ -36,7 +37,11 @@ Sensors are created automatically via MQTT discovery (`sensor.ngenic_*`):
 The controller node reports both the **real** outdoor temperature
 (`temperature_C`) and the **fictional** one it feeds your heating system
 (`control_value_C`). Their difference is exactly the offset Tune adds, which
-the Ngenic app calls *Påverkan*:
+the Ngenic app calls *Påverkan*. The bridge computes and publishes it
+directly as the sensor **`Ngenic Influence (<controller name>)`** — no extra
+setup needed. With several controllers, each one gets its own influence sensor.
+
+If you run an older release, or prefer your own template sensor:
 
 ```yaml
 template:
