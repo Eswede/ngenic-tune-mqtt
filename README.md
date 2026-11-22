@@ -13,7 +13,9 @@ integration (removed from HACS in March 2025: it has not been maintained since
 
 ## What you get in Home Assistant
 
-Sensors are created automatically via MQTT discovery (`sensor.ngenic_*`):
+Sensors are created automatically via MQTT discovery (`sensor.ngenic_*`).
+All entities are grouped onto a single `Ngenic Tune` device per Tune, instead of
+one device per radio node:
 
 | Entity | Meaning |
 |---|---|

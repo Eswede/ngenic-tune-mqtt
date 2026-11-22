@@ -291,7 +291,7 @@ def extract_value(payload):
     return None, None
 
 
-def discover(node_slug, node_uuid, mtype, node_name, label=None):
+def discover(node_slug, node_uuid, mtype, node_name, label=None, device=None):
     device_class, unit = UNIT_BY_TYPE.get(mtype, (None, None))
     unique_id = f"ngenic_{node_slug}_{slugify(mtype)}"
     config = {
@@ -299,7 +299,7 @@ def discover(node_slug, node_uuid, mtype, node_name, label=None):
         "unique_id": unique_id,
         "state_topic": f"ngenic/{node_slug}/{mtype}",
         "availability_topic": AVAIL_TOPIC,
-        "device": {
+        "device": device or {
             "identifiers": [f"ngenic_{node_uuid}"],
             "name": f"Ngenic {node_name}",
             "manufacturer": "Ngenic",
@@ -351,11 +351,15 @@ def poll_once():
     if not isinstance(tunes, list) or not tunes:
         log.warning("Inga tunes hittades (eller token utan behörighet).")
         return
+    bridge_dev = [MQTT_CLIENT_ID], "Ngenic bridge"
 
     for tune in tunes:
         tune_uuid = tune.get("tuneUuid") or tune.get("uuid")
         if not tune_uuid:
             continue
+        # Alla entiteter publiceras pa EN gemensam HA-enhet per tune.
+        main_dev = [f"ngenic_tune_{tune_uuid}"], "Ngenic Tune"
+        bridge_dev = main_dev
         detail = api_get(f"/tunes/{tune_uuid}") or {}
         tune_name = detail.get("name") or tune.get("tuneName") or "tune"
 
@@ -373,8 +377,7 @@ def poll_once():
                 disc("sensor", f"ngenic_{rslug}_target_c",
                      f"Ngenic {room_name} target temperature",
                      f"ngenic/{rslug}/target_c",
-                     [f"ngenic_room_{room.get('uuid', rslug)}"],
-                     f"Ngenic {room_name}",
+                     main_dev[0], main_dev[1],
                      device_class="temperature", unit="°C")
                 pub(f"ngenic/{rslug}/target_c", str(round(float(target), 1)),
                     retain=True)
@@ -418,7 +421,10 @@ def poll_once():
                 if value is None:
                     continue
                 state_topic = discover(node_slug, node_uuid, mtype, node_name,
-                                        label=friendly_label(node.get("type"), mtype))
+                                        label=friendly_label(node.get("type"), mtype),
+                                        device={"identifiers": main_dev[0],
+                                                "name": main_dev[1],
+                                                "manufacturer": "Ngenic"})
                 if isinstance(value, float):
                     value = round(value, 2)
                 pub(state_topic, str(value), retain=True)
@@ -437,7 +443,7 @@ def poll_once():
                     disc("sensor", f"ngenic_{node_slug}_influence",
                          f"Ngenic Influence ({node_name})",
                          f"ngenic/{node_slug}/influence",
-                         [f"ngenic_{node_uuid}"], f"Ngenic {node_name}",
+                         main_dev[0], main_dev[1],
                          device_class="temperature", unit="°C")
                     pub(f"ngenic/{node_slug}/influence",
                         str(round(injected - real, 2)), retain=True)
@@ -456,8 +462,8 @@ def poll_once():
                     "payload_on": "True",
                     "payload_off": "False",
                     "availability_topic": AVAIL_TOPIC,
-                    "device": {"identifiers": [f"ngenic_tune_{tune_uuid}"],
-                               "name": f"Ngenic {tune_name}", "manufacturer": "Ngenic"},
+                    "device": {"identifiers": main_dev[0],
+                               "name": main_dev[1], "manufacturer": "Ngenic"},
                 }),
                 retain=True,
             )
@@ -473,8 +479,7 @@ def poll_once():
             disc("binary_sensor", uid,
                  "Ngenic user-defined controls active",
                  f"ngenic/{slugify(tune_name)}/user_defined_controls",
-                 [f"ngenic_tune_{tune_uuid}"], f"Ngenic {tune_name}",
-                 payload_on="True")
+                 main_dev[0], main_dev[1], payload_on="True")
             pub(
                 f"ngenic/{slugify(tune_name)}/user_defined_controls",
                 str(settings.get("controlOnUserDefinedControls")),
@@ -487,7 +492,7 @@ def poll_once():
             if not nu:
                 continue
             nname, nslug = labels.get(nu, (f"node{nu[:8]}", slugify(f"node_{nu[:8]}")))
-            dev = [f"ngenic_{nu}"], f"Ngenic {nname}"
+            dev = main_dev
             disc("binary_sensor", f"ngenic_{nslug}_connected",
                  f"Ngenic {nname} connected", f"ngenic/{nslug}/connected",
                  dev[0], dev[1], payload_on="True")
@@ -515,7 +520,7 @@ def poll_once():
                 active = sch
                 break
         tslug = slugify(tune_name)
-        tune_dev = [f"ngenic_tune_{tune_uuid}"], f"Ngenic {tune_name}"
+        tune_dev = main_dev
         disc("binary_sensor", "ngenic_schedule_active",
              "Ngenic away schedule active", f"ngenic/{tslug}/schedule_active",
              tune_dev[0], tune_dev[1], payload_on="True")
@@ -548,8 +553,8 @@ def poll_once():
             "device_class": "timestamp",
             "availability_topic": AVAIL_TOPIC,
             "entity_category": "diagnostic",
-            "device": {"identifiers": [MQTT_CLIENT_ID],
-                       "name": "Ngenic bridge", "manufacturer": "DIY"},
+            "device": {"identifiers": bridge_dev[0],
+                       "name": bridge_dev[1], "manufacturer": "Ngenic"},
         }),
         retain=True,
     )
