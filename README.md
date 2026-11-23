@@ -22,7 +22,7 @@ one device per radio node:
 | `ngenic_<room>_temperature_c` | Indoor sensor temperature |
 | `ngenic_<room>_humidity_relative_percent` | Humidity (if the sensor reports it) |
 | `ngenic_<room>_target_temperature_c` / `..._target_c` | Room target temperature |
-| `ngenic_controller_<id>_temperature_c` | **Real outdoor temperature** (the controller's sensor) |
+| `ngenic_controller_<id>_temperature_c` | **Outdoor temperature at the controller's own sensor**|
 | `ngenic_controller_<id>_control_value_c` | **Fake outdoor temperature Tune feeds your heat system** |
 | `ngenic_controller_<id>_process_value_c` / `..._setpoint_value_c` | Process value / computed setpoint |
 | **`ngenic_controller_<id>_influence`** | **Tune's "Påverkan" (influence), computed by the bridge: `control_value_C − temperature_C`** |
@@ -56,7 +56,7 @@ average through the heating season, your heating curve is badly set.
 ## Quick start (Docker Compose)
 
 ```bash
-git clone https://github.com/<you>/ngenic-tune-mqtt.git
+git clone https://github.com/Eswede/ngenic-tune-mqtt.git
 cd ngenic-tune-mqtt
 cp ngenic.env.example ngenic.env   # add your token + broker, then:
 chmod 600 ngenic.env
