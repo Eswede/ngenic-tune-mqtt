@@ -36,30 +36,20 @@ one device per radio node:
 
 ### The interesting part: Tune's "influence" (Påverkan)
 
-The controller node reports both the **real** outdoor temperature
-(`temperature_C`) and the **fictional** one it feeds your heating system
+The controller node reports both the outdoor temperature at its own sensor
+(`temperature_C`) and the fictional one it feeds your heating system
 (`control_value_C`). Their difference is exactly the offset Tune adds, which
-the Ngenic app calls *Påverkan*. The bridge computes and publishes it
-directly as the sensor **`Ngenic Influence (<controller name>)`** — no extra
-setup needed. With several controllers, each one gets its own influence sensor.
+the Ngenic app calls *Påverkan*. The bridge computes and publishes it directly
+as the sensor **`Ngenic Influence (<controller name>)`** — no extra setup
+needed. With several controllers, each one gets its own influence sensor.
 
-If you run an older release, or prefer your own template sensor:
+> **Note:** `temperature_C` is measured by the controller node itself. If it is
+> mounted in a cold utility room it can sit a few degrees off the true outdoor
+> temperature. Influence is still exact, since both terms come from the same
+> node — but do not use it to compare against a weather station.
 
-```yaml
-template:
-  - sensor:
-      - name: "Ngenic influence"
-        unit_of_measurement: "°C"
-        device_class: temperature
-        state: >
-          {{ states('sensor.ngenic_controller_b308bb65_control_value_c') | float(-999)
-             - states('sensor.ngenic_controller_b308bb65_temperature_c') | float(-999) }}
-```
-
-(Replace the `b308bb65` parts with your own controller's entity IDs.)
-
-Since heating curves slope down, a **positive** influence means Tune pretends it
-is warmer outside than it is, which **lowers** the forward temperature: the
+Since heating curves slope down, a **positive** influence means Tune pretends
+it is warmer outside than it is, which **lowers** the forward temperature: the
 energy-saving direction. Ngenic's rule of thumb: if it stays beyond ±4 °C on
 average through the heating season, your heating curve is badly set.
 
